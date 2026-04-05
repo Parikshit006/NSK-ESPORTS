@@ -7,8 +7,12 @@ import { useToast } from '../contexts/ToastContext';
 export default function RegistrationPage() {
   const { slug } = useParams();
   const [tournament, setTournament] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState({});
+  const [screenshotFile, setScreenshotFile] = useState(null);
+  const [screenshotPreview, setScreenshotPreview] = useState('');
   const toast = useToast();
 
   const [form, setForm] = useState({
@@ -22,14 +26,29 @@ export default function RegistrationPage() {
       { ign: '', uid: '', role: 'Member' },
       { ign: '', uid: '', role: 'Member' },
     ],
-    payment: { transactionId: '', screenshotData: '' },
+    payment: { transactionId: '' },
     agreedRules: false,
     agreedIGN: false,
   });
 
   useEffect(() => {
-    setTournament(getTournamentBySlug(slug));
+    async function load() {
+      setLoading(true);
+      try {
+        const t = await getTournamentBySlug(slug);
+        setTournament(t);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
   }, [slug]);
+
+  if (loading) {
+    return <div className="page"><div className="container text-center" style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><p style={{ color: 'var(--text-secondary)' }}>Loading...</p></div></div>;
+  }
 
   if (!tournament) {
     return <div className="page"><div className="container text-center"><h2>Tournament not found</h2></div></div>;
@@ -38,7 +57,7 @@ export default function RegistrationPage() {
   const fee = parseInt(tournament.entry?.fee) || 0;
   const isRegOpen = tournament.status === 'registration_open';
   const totalSlots = parseInt(tournament.slots?.total) || 0;
-  const filledSlots = (tournament.teams || []).filter(t => t.status !== 'rejected').length;
+  const filledSlots = parseInt(tournament.slots?.filled) || 0;
   const slotsFull = filledSlots >= totalSlots;
 
   if (!isRegOpen) {
@@ -111,13 +130,9 @@ export default function RegistrationPage() {
       toast.error('File too large. Max 5MB.');
       return;
     }
+    setScreenshotFile(file);
     const reader = new FileReader();
-    reader.onload = () => {
-      setForm(prev => ({
-        ...prev,
-        payment: { ...prev.payment, screenshotData: reader.result },
-      }));
-    };
+    reader.onload = () => setScreenshotPreview(reader.result);
     reader.readAsDataURL(file);
   };
 
@@ -134,7 +149,7 @@ export default function RegistrationPage() {
 
     if (fee > 0) {
       if (!form.payment.transactionId.trim()) e.transactionId = 'Transaction ID is required';
-      if (!form.payment.screenshotData) e.screenshot = 'Payment screenshot is required';
+      if (!screenshotFile) e.screenshot = 'Payment screenshot is required';
     }
 
     if (!form.agreedRules) e.agreedRules = 'You must agree to the rules';
@@ -144,15 +159,16 @@ export default function RegistrationPage() {
     return Object.keys(e).length === 0;
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) {
       toast.error('Please fix the errors above');
       return;
     }
 
+    setSubmitting(true);
     try {
-      registerTeam(tournament.id, {
+      await registerTeam(tournament.id, {
         teamName: form.teamName.trim(),
         leaderName: form.leaderName.trim(),
         leaderWhatsapp: form.leaderWhatsapp.trim(),
@@ -162,15 +178,14 @@ export default function RegistrationPage() {
           uid: p.uid.trim(),
           role: p.role,
         })),
-        payment: fee > 0 ? {
-          transactionId: form.payment.transactionId.trim(),
-          screenshotData: form.payment.screenshotData,
-        } : null,
-      });
+        transactionId: fee > 0 ? form.payment.transactionId.trim() : null,
+      }, fee > 0 ? screenshotFile : null);
       setSubmitted(true);
       toast.success('Registration submitted! ⚔️');
     } catch (err) {
       toast.error(err.message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -291,8 +306,8 @@ export default function RegistrationPage() {
                   onChange={handleFileUpload}
                   style={{ padding: 'var(--space-2)' }} />
                 {errors.screenshot && <div className="form-error">{errors.screenshot}</div>}
-                {form.payment.screenshotData && (
-                  <img src={form.payment.screenshotData} alt="Payment screenshot"
+                {screenshotPreview && (
+                  <img src={screenshotPreview} alt="Payment screenshot"
                     style={{ maxWidth: 200, borderRadius: 'var(--radius-md)', marginTop: 'var(--space-2)' }} />
                 )}
               </div>
@@ -321,8 +336,9 @@ export default function RegistrationPage() {
           </div>
 
           {/* Submit */}
-          <button type="submit" className="btn btn-primary btn-lg w-full" style={{ marginBottom: 'var(--space-12)' }}>
-            ⚔️ Lock In My Squad
+          <button type="submit" className="btn btn-primary btn-lg w-full" disabled={submitting}
+            style={{ marginBottom: 'var(--space-12)' }}>
+            {submitting ? '⏳ Submitting...' : '⚔️ Lock In My Squad'}
           </button>
         </form>
       </div>

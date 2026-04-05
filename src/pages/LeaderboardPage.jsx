@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { getTournamentBySlug } from '../services/dataService';
-import { buildLeaderboard, getScoringConfig, SCORING_PRESETS } from '../utils/scoring';
-import { copyToClipboard, openWhatsApp } from '../utils/helpers';
+import { useLeaderboard } from '../hooks/useLeaderboard';
+import { getScoringConfig } from '../utils/scoring';
+import { copyToClipboard, openWhatsApp, timeAgo } from '../utils/helpers';
 import { useToast } from '../contexts/ToastContext';
 import ResultsTemplate from '../components/leaderboard/ResultsTemplate';
 
@@ -11,31 +12,42 @@ export default function LeaderboardPage() {
   const [tournament, setTournament] = useState(null);
   const [screenshotMode, setScreenshotMode] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
-  const [viewMode, setViewMode] = useState('table'); // 'table' or 'template'
+  const [viewMode, setViewMode] = useState('table');
   const tableRef = useRef(null);
   const toast = useToast();
 
   useEffect(() => {
-    const t = getTournamentBySlug(slug);
-    setTournament(t);
-
-    // Poll for updates every 10 seconds
-    const interval = setInterval(() => {
-      setTournament(getTournamentBySlug(slug));
-    }, 10000);
-    return () => clearInterval(interval);
+    async function load() {
+      const t = await getTournamentBySlug(slug);
+      setTournament(t);
+    }
+    load();
   }, [slug]);
 
+  const { leaderboard: standings, loading, lastUpdated, refetch } = useLeaderboard(tournament?.id);
+
   if (!tournament) {
-    return <div className="page"><div className="container text-center"><h2>Tournament not found</h2></div></div>;
+    return <div className="page"><div className="container text-center"><h2>Loading...</h2></div></div>;
   }
 
-  const standings = buildLeaderboard(tournament);
   const scoring = getScoringConfig(tournament);
   const numMatches = parseInt(tournament.schedule?.numMatches) || 0;
-  const publishedCount = (tournament.matches || []).filter(m => m.published).length;
   const qualifierEnabled = tournament.qualifier?.enabled;
   const topN = parseInt(tournament.qualifier?.topN) || 0;
+
+  // Convert leaderboard matchResults from object to array for table display
+  const standingsForTable = standings.map(team => {
+    const matchResultsArray = [];
+    for (let i = 1; i <= numMatches; i++) {
+      const mr = team.matchResults?.[i];
+      if (mr) {
+        matchResultsArray.push(mr);
+      } else {
+        matchResultsArray.push({ matchNumber: i, placement: null, kills: null, placementPts: null, killPts: null, totalPts: null });
+      }
+    }
+    return { ...team, matchResults: matchResultsArray };
+  });
 
   const handleShareWhatsApp = () => {
     const url = `${window.location.origin}/tournament/${slug}/leaderboard`;
@@ -51,14 +63,18 @@ export default function LeaderboardPage() {
             {tournament.basicInfo?.name}
           </h1>
           <p className="page-subtitle">
-            {screenshotMode ? '' : `Updated after each match | ${numMatches} Maps Total | ${publishedCount} Published`}
+            {screenshotMode ? '' : (
+              <>
+                {numMatches} Maps Total
+                {lastUpdated && ` • Updated ${timeAgo(lastUpdated.toISOString())}`}
+              </>
+            )}
           </p>
         </div>
 
         {/* Action Buttons */}
         {!screenshotMode && (
           <div className="flex gap-2 justify-center mb-6 no-screenshot" style={{ flexWrap: 'wrap' }}>
-            {/* View Toggle */}
             <div style={{
               display: 'flex', borderRadius: 'var(--radius-md)', overflow: 'hidden',
               border: '1px solid var(--border-default)'
@@ -86,7 +102,7 @@ export default function LeaderboardPage() {
               📤 Share WhatsApp
             </button>
             <button className="btn btn-ghost btn-sm" onClick={() => {
-              setTournament(getTournamentBySlug(slug));
+              refetch();
               toast.success('Leaderboard refreshed!');
             }}>
               🔄 Refresh
@@ -131,15 +147,15 @@ export default function LeaderboardPage() {
           </div>
         )}
 
-        {/* ====== TEMPLATE VIEW (PICT Cup Style) ====== */}
+        {/* ====== TEMPLATE VIEW ====== */}
         {viewMode === 'template' && (
           <ResultsTemplate tournament={tournament} toast={toast} />
         )}
 
-        {/* ====== TABLE VIEW (Default) ====== */}
+        {/* ====== TABLE VIEW ====== */}
         {viewMode === 'table' && (
           <>
-            {standings.length === 0 ? (
+            {standingsForTable.length === 0 ? (
               <div className="card text-center" style={{ padding: 'var(--space-12)' }}>
                 <div style={{ fontSize: '64px', marginBottom: 'var(--space-4)' }}>📊</div>
                 <h3>No Results Yet</h3>
@@ -149,7 +165,6 @@ export default function LeaderboardPage() {
               <div className="table-container" style={{
                 borderColor: screenshotMode ? 'var(--accent-orange)' : undefined,
               }}>
-                {/* Tournament badge header for screenshot */}
                 {screenshotMode && (
                   <div style={{
                     background: 'linear-gradient(135deg, var(--bg-secondary), var(--bg-card))',
@@ -161,7 +176,7 @@ export default function LeaderboardPage() {
                       🏆 {tournament.basicInfo?.name} — STANDINGS
                     </h3>
                     <p className="muted-text" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>
-                      {tournament.basicInfo?.organizer} | {publishedCount}/{numMatches} Maps Played
+                      {tournament.basicInfo?.organizer}
                     </p>
                   </div>
                 )}
@@ -172,23 +187,20 @@ export default function LeaderboardPage() {
                       <th className="sticky-col sticky-col-rank" style={{ textAlign: 'center' }}>Rank</th>
                       <th className="sticky-col sticky-col-team">Team Name</th>
                       {Array.from({ length: numMatches }, (_, i) => (
-                        <th key={i} style={{ textAlign: 'center' }}>
-                          M{i + 1}
-                          {(tournament.matches || [])[i]?.published && publishedCount === i + 1 && ' 🔴'}
-                        </th>
+                        <th key={i} style={{ textAlign: 'center' }}>M{i + 1}</th>
                       ))}
                       <th style={{ textAlign: 'center' }}>Total Kills</th>
                       <th style={{ textAlign: 'center' }}>Total Pts</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {standings.map((team, i) => {
+                    {standingsForTable.map((team) => {
                       const isQualified = qualifierEnabled && team.rank > 0 && team.rank <= topN;
                       const isDQ = team.status === 'disqualified';
                       const rankClass = isDQ ? 'dq' : team.rank === 1 ? 'rank-1' : team.rank === 2 ? 'rank-2' : team.rank === 3 ? 'rank-3' : '';
 
                       return (
-                        <tr key={team.teamId} className={rankClass}>
+                        <tr key={team.teamId || team.id} className={rankClass}>
                           <td className="rank-cell sticky-col sticky-col-rank">
                             {isDQ ? (
                               <span className="badge badge-danger">DQ</span>
@@ -236,7 +248,6 @@ export default function LeaderboardPage() {
               </div>
             )}
 
-            {/* Footer attribution for screenshot mode */}
             {screenshotMode && (
               <div className="text-center mt-4" style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>
                 {tournament.basicInfo?.organizer} • {tournament.basicInfo?.name}

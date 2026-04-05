@@ -108,7 +108,10 @@ export default function CreateTournament() {
     setStep(prev => Math.max(prev - 1, 0));
   };
 
-  const handleSubmit = () => {
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
     try {
       // Auto-handle payment fields based on fee
       const finalForm = { ...form };
@@ -127,11 +130,13 @@ export default function CreateTournament() {
         };
       }
 
-      const tournament = createTournament(finalForm);
+      await createTournament(finalForm);
       toast.success('Tournament created successfully! 🎮');
       navigate('/admin');
     } catch (err) {
       toast.error(err.message || 'Failed to create tournament');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -607,8 +612,8 @@ export default function CreateTournament() {
                 Next →
               </button>
             ) : (
-              <button className="btn btn-primary btn-lg" onClick={handleSubmit}>
-                🚀 Create Tournament
+              <button className="btn btn-primary btn-lg" onClick={handleSubmit} disabled={submitting}>
+                {submitting ? '⏳ Creating...' : '🚀 Create Tournament'}
               </button>
             )}
           </div>

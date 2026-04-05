@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
-  getTournamentById, updateTournament, approveTeam, rejectTeam,
+  getFullTournament, updateTournament, approveTeam, rejectTeam,
   disqualifyTeam, updateTeam, saveMatchResults, updateRoomInfo,
-  toggleRoomRelease, addAnnouncement, deleteAnnouncement, lookupIGN, searchIGN
+  toggleRoomRelease, addAnnouncement, deleteAnnouncement, searchIGN,
+  subscribeToTeams
 } from '../../services/dataService';
 import { buildLeaderboard, calculateMatchPoints, getScoringConfig } from '../../utils/scoring';
 import {
@@ -26,19 +27,45 @@ const TABS = [
 export default function ManageTournament() {
   const { tournamentId } = useParams();
   const [tournament, setTournament] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const toast = useToast();
 
-  const reload = () => setTournament(getTournamentById(tournamentId));
+  const reload = useCallback(async () => {
+    try {
+      const data = await getFullTournament(tournamentId);
+      setTournament(data);
+    } catch (err) {
+      console.error('Failed to load tournament:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [tournamentId]);
 
-  useEffect(() => { reload(); }, [tournamentId]);
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  // Realtime subscription for new team registrations (admin only)
+  useEffect(() => {
+    if (!tournamentId) return;
+    const unsub = subscribeToTeams(tournamentId, () => {
+      reload();
+    });
+    return unsub;
+  }, [tournamentId, reload]);
+
+  if (loading) {
+    return (
+      <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '50vh' }}>
+        <p style={{ color: 'var(--text-secondary)' }}>Loading tournament...</p>
+      </div>
+    );
+  }
 
   if (!tournament) {
     return <div className="page"><div className="container text-center"><h2>Tournament not found</h2></div></div>;
   }
-
-  const confirmed = (tournament.teams || []).filter(t => t.status === 'confirmed');
-  const pending = (tournament.teams || []).filter(t => t.status === 'pending');
 
   return (
     <div className="page">
@@ -144,48 +171,75 @@ function OverviewTab({ tournament }) {
 // ====== TEAMS TAB ======
 function TeamsTab({ tournament, reload, toast }) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [ignResults, setIgnResults] = useState([]);
   const [viewTeam, setViewTeam] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
   const [dqReason, setDqReason] = useState('');
   const [showRejectModal, setShowRejectModal] = useState(null);
   const [showDqModal, setShowDqModal] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
   const teams = tournament.teams || [];
-  const ignResults = searchQuery.trim() ? searchIGN(tournament.id, searchQuery) : [];
 
-  const handleApprove = (teamId) => {
+  // Search IGN
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setIgnResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const results = await searchIGN(tournament.id, searchQuery);
+        setIgnResults(results);
+      } catch (err) {
+        console.error('IGN search error:', err);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, tournament.id]);
+
+  const handleApprove = async (teamId) => {
+    setActionLoading(true);
     try {
-      const team = approveTeam(tournament.id, teamId);
-      const msg = generateApprovalMessage(team, getTournamentById(tournament.id));
-      copyToClipboard(msg);
+      const team = await approveTeam(tournament.id, teamId);
+      const msg = generateApprovalMessage(team, tournament);
+      await copyToClipboard(msg);
       toast.success('Team approved! WhatsApp message copied 📋');
-      reload();
+      await reload();
     } catch (err) {
       toast.error(err.message);
+    } finally {
+      setActionLoading(false);
     }
   };
 
-  const handleReject = () => {
+  const handleReject = async () => {
+    setActionLoading(true);
     try {
-      rejectTeam(tournament.id, showRejectModal, rejectReason);
+      await rejectTeam(tournament.id, showRejectModal, rejectReason);
       toast.success('Team rejected');
       setShowRejectModal(null);
       setRejectReason('');
-      reload();
+      await reload();
     } catch (err) {
       toast.error(err.message);
+    } finally {
+      setActionLoading(false);
     }
   };
 
-  const handleDq = () => {
+  const handleDq = async () => {
+    setActionLoading(true);
     try {
-      disqualifyTeam(tournament.id, showDqModal, dqReason);
+      await disqualifyTeam(tournament.id, showDqModal, dqReason);
       toast.success('Team disqualified');
       setShowDqModal(null);
       setDqReason('');
-      reload();
+      await reload();
     } catch (err) {
       toast.error(err.message);
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -253,7 +307,7 @@ function TeamsTab({ tournament, reload, toast }) {
                         <button className="btn btn-ghost btn-sm" onClick={() => setViewTeam(team)}>👁️</button>
                         {team.status === 'pending' && (
                           <>
-                            <button className="btn btn-success btn-sm" onClick={() => handleApprove(team.id)}>✅</button>
+                            <button className="btn btn-success btn-sm" onClick={() => handleApprove(team.id)} disabled={actionLoading}>✅</button>
                             <button className="btn btn-danger btn-sm" onClick={() => setShowRejectModal(team.id)}>❌</button>
                           </>
                         )}
@@ -306,9 +360,11 @@ function TeamsTab({ tournament, reload, toast }) {
                 <>
                   <h4 className="mt-4 mb-2">Payment</h4>
                   <p><strong>Transaction ID:</strong> {viewTeam.payment.transactionId}</p>
-                  {viewTeam.payment.screenshotData && (
-                    <img src={viewTeam.payment.screenshotData} alt="Payment screenshot"
-                      style={{ maxWidth: '100%', borderRadius: 'var(--radius-md)', marginTop: 'var(--space-2)' }} />
+                  {viewTeam.payment.screenshotUrl && (
+                    <a href={viewTeam.payment.screenshotUrl} target="_blank" rel="noopener noreferrer">
+                      <img src={viewTeam.payment.screenshotUrl} alt="Payment screenshot"
+                        style={{ maxWidth: '100%', borderRadius: 'var(--radius-md)', marginTop: 'var(--space-2)' }} />
+                    </a>
                   )}
                 </>
               )}
@@ -332,7 +388,7 @@ function TeamsTab({ tournament, reload, toast }) {
             </div>
             <div className="modal-footer">
               <button className="btn btn-ghost" onClick={() => setShowRejectModal(null)}>Cancel</button>
-              <button className="btn btn-danger" onClick={handleReject}>Reject</button>
+              <button className="btn btn-danger" onClick={handleReject} disabled={actionLoading}>Reject</button>
             </div>
           </div>
         </div>
@@ -353,7 +409,7 @@ function TeamsTab({ tournament, reload, toast }) {
             </div>
             <div className="modal-footer">
               <button className="btn btn-ghost" onClick={() => setShowDqModal(null)}>Cancel</button>
-              <button className="btn btn-danger" onClick={handleDq}>Disqualify</button>
+              <button className="btn btn-danger" onClick={handleDq} disabled={actionLoading}>Disqualify</button>
             </div>
           </div>
         </div>
@@ -366,7 +422,7 @@ function TeamsTab({ tournament, reload, toast }) {
 function ResultsTab({ tournament, reload, toast }) {
   const [selectedMatch, setSelectedMatch] = useState(1);
   const [results, setResults] = useState({});
-  const [mode, setMode] = useState('team'); // team or ign
+  const [publishing, setPublishing] = useState(false);
 
   const scoring = getScoringConfig(tournament);
   const confirmedTeams = (tournament.teams || []).filter(t => t.status === 'confirmed' || t.status === 'disqualified');
@@ -388,8 +444,20 @@ function ResultsTab({ tournament, reload, toast }) {
   const updateResult = (teamId, field, value) => {
     setResults(prev => ({
       ...prev,
-      [teamId]: { ...prev[teamId], [field]: parseInt(value) || 0 },
+      [teamId]: { ...(prev[teamId] || {}), [field]: parseInt(value) || 0 },
     }));
+  };
+
+  const updatePlayerKill = (teamId, ign, value) => {
+    setResults(prev => {
+      const current = prev[teamId] || {};
+      const newPlayerKills = { ...(current.playerKills || {}), [ign]: parseInt(value) || 0 };
+      const totalKills = Object.values(newPlayerKills).reduce((a, b) => a + b, 0);
+      return {
+        ...prev,
+        [teamId]: { ...current, playerKills: newPlayerKills, kills: totalKills }
+      };
+    });
   };
 
   const getPreview = (teamId) => {
@@ -398,7 +466,7 @@ function ResultsTab({ tournament, reload, toast }) {
     return calculateMatchPoints(r.placement, r.kills || 0, scoring);
   };
 
-  const handlePublish = () => {
+  const handlePublish = async () => {
     const resultArray = Object.entries(results).map(([teamId, data]) => {
       const pts = calculateMatchPoints(data.placement || 0, data.kills || 0, scoring);
       return {
@@ -416,12 +484,15 @@ function ResultsTab({ tournament, reload, toast }) {
       return;
     }
 
+    setPublishing(true);
     try {
-      saveMatchResults(tournament.id, selectedMatch, resultArray);
+      await saveMatchResults(tournament.id, selectedMatch, resultArray);
       toast.success(`Match ${selectedMatch} results published! ✅`);
-      reload();
+      await reload();
     } catch (err) {
       toast.error(err.message);
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -475,7 +546,21 @@ function ResultsTab({ tournament, reload, toast }) {
                       return (
                         <tr key={team.id} className={team.status === 'disqualified' ? 'dq' : ''}>
                           <td className="rank-cell">#{team.slotNumber}</td>
-                          <td className="team-cell">{team.teamName}</td>
+                          <td className="team-cell">
+                            <div style={{ fontWeight: 600, marginBottom: '6px' }}>{team.teamName}</div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '6px' }}>
+                              {(team.players || []).map((p, i) => (
+                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
+                                  <input type="number" min={0}
+                                    style={{ width: '36px', height: '24px', padding: '0 4px', background: 'var(--bg-dark)', border: '1px solid var(--border-default)', borderRadius: '4px', textAlign: 'center', color: 'var(--text-primary)' }}
+                                    value={results[team.id]?.playerKills?.[p.ign] || ''}
+                                    onChange={e => updatePlayerKill(team.id, p.ign, e.target.value)}
+                                    disabled={team.status === 'disqualified'} />
+                                  <span className="muted-text" title={p.ign} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.ign}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </td>
                           <td>
                             <input type="number" className="form-input" min={1}
                               style={{ padding: 'var(--space-2)' }}
@@ -486,10 +571,11 @@ function ResultsTab({ tournament, reload, toast }) {
                           </td>
                           <td>
                             <input type="number" className="form-input" min={0}
-                              style={{ padding: 'var(--space-2)' }}
-                              placeholder="Kills"
+                              style={{ padding: 'var(--space-2)', background: 'var(--bg-lighter)' }}
+                              placeholder="Total"
+                              title="Calculated from individual players"
                               value={results[team.id]?.kills || ''}
-                              onChange={e => updateResult(team.id, 'kills', e.target.value)}
+                              readOnly
                               disabled={team.status === 'disqualified'} />
                           </td>
                           <td>
@@ -516,8 +602,8 @@ function ResultsTab({ tournament, reload, toast }) {
               <div className="muted-text" style={{ fontSize: 'var(--text-sm)' }}>
                 {Object.values(results).filter(r => r.placement > 0).length} / {confirmedTeams.length} teams entered
               </div>
-              <button className="btn btn-primary" onClick={handlePublish}>
-                📢 {match?.published ? 'Update & Re-Publish' : 'Publish Results'}
+              <button className="btn btn-primary" onClick={handlePublish} disabled={publishing}>
+                {publishing ? '⏳ Publishing...' : `📢 ${match?.published ? 'Update & Re-Publish' : 'Publish Results'}`}
               </button>
             </div>
           </>
@@ -529,16 +615,24 @@ function ResultsTab({ tournament, reload, toast }) {
 
 // ====== ROOMS TAB ======
 function RoomsTab({ tournament, reload, toast }) {
-  const handleSaveRoom = (matchNumber, roomId, password) => {
-    updateRoomInfo(tournament.id, matchNumber, roomId, password);
-    reload();
-    toast.success(`Room info saved for Match ${matchNumber}`);
+  const handleSaveRoom = async (matchNumber, roomId, password) => {
+    try {
+      await updateRoomInfo(tournament.id, matchNumber, roomId, password);
+      await reload();
+      toast.success(`Room info saved for Match ${matchNumber}`);
+    } catch (err) {
+      toast.error(err.message);
+    }
   };
 
-  const handleToggle = (matchNumber) => {
-    const released = toggleRoomRelease(tournament.id, matchNumber);
-    reload();
-    toast.success(released ? `Room ${matchNumber} released to teams! 🚪` : `Room ${matchNumber} hidden`);
+  const handleToggle = async (matchNumber) => {
+    try {
+      const released = await toggleRoomRelease(tournament.id, matchNumber);
+      await reload();
+      toast.success(released ? `Room ${matchNumber} released to teams! 🚪` : `Room ${matchNumber} hidden`);
+    } catch (err) {
+      toast.error(err.message);
+    }
   };
 
   return (
@@ -599,19 +693,31 @@ function RoomCard({ match, onSave, onToggle, toast }) {
 // ====== ANNOUNCEMENTS TAB ======
 function AnnouncementsTab({ tournament, reload, toast }) {
   const [text, setText] = useState('');
+  const [posting, setPosting] = useState(false);
 
-  const handlePost = () => {
+  const handlePost = async () => {
     if (!text.trim()) return;
-    addAnnouncement(tournament.id, text.trim());
-    setText('');
-    reload();
-    toast.success('Announcement posted! 📢');
+    setPosting(true);
+    try {
+      await addAnnouncement(tournament.id, text.trim());
+      setText('');
+      await reload();
+      toast.success('Announcement posted! 📢');
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setPosting(false);
+    }
   };
 
-  const handleDelete = (id) => {
-    deleteAnnouncement(tournament.id, id);
-    reload();
-    toast.success('Announcement deleted');
+  const handleDelete = async (id) => {
+    try {
+      await deleteAnnouncement(tournament.id, id);
+      await reload();
+      toast.success('Announcement deleted');
+    } catch (err) {
+      toast.error(err.message);
+    }
   };
 
   return (
@@ -624,14 +730,16 @@ function AnnouncementsTab({ tournament, reload, toast }) {
             onChange={e => setText(e.target.value)}
             placeholder="Write your announcement here..." rows={3} />
         </div>
-        <button className="btn btn-primary btn-sm" onClick={handlePost}>📢 Post Announcement</button>
+        <button className="btn btn-primary btn-sm" onClick={handlePost} disabled={posting}>
+          {posting ? '⏳ Posting...' : '📢 Post Announcement'}
+        </button>
       </div>
 
       {(tournament.announcements || []).map(a => (
         <div key={a.id} className="card mb-3" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <p>{a.text}</p>
-            <span className="muted-text" style={{ fontSize: 'var(--text-xs)' }}>{timeAgo(a.createdAt)}</span>
+            <span className="muted-text" style={{ fontSize: 'var(--text-xs)' }}>{timeAgo(a.created_at || a.createdAt)}</span>
           </div>
           <button className="btn btn-ghost btn-icon btn-sm" onClick={() => handleDelete(a.id)}>🗑️</button>
         </div>

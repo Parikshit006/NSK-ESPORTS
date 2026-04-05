@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getTournamentBySlug, getAllTournaments } from '../services/dataService';
+import { getTournamentBySlug, getPublicTournaments } from '../services/dataService';
 import { formatDate, formatTime, formatCurrency, getCountdown, STATUS_CONFIG } from '../utils/helpers';
 
 export default function HomePage() {
@@ -8,14 +8,26 @@ export default function HomePage() {
   const [tournament, setTournament] = useState(null);
   const [countdown, setCountdown] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0, expired: false });
   const [tournaments, setTournaments] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (slug) {
-      setTournament(getTournamentBySlug(slug));
-    } else {
-      // Landing — show all public tournaments
-      setTournaments(getAllTournaments().filter(t => t.status !== 'draft' && t.status !== 'archived'));
+    async function load() {
+      setLoading(true);
+      try {
+        if (slug) {
+          const t = await getTournamentBySlug(slug);
+          setTournament(t);
+        } else {
+          const all = await getPublicTournaments();
+          setTournaments(all);
+        }
+      } catch (err) {
+        console.error('Failed to load:', err);
+      } finally {
+        setLoading(false);
+      }
     }
+    load();
   }, [slug]);
 
   useEffect(() => {
@@ -27,30 +39,26 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, [tournament]);
 
+  if (loading) {
+    return (
+      <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
+        <p style={{ color: 'var(--text-secondary)' }}>Loading...</p>
+      </div>
+    );
+  }
+
   // ====== TOURNAMENT LANDING PAGE ======
   if (slug && tournament) {
     const fee = parseInt(tournament.entry?.fee) || 0;
     const totalSlots = parseInt(tournament.slots?.total) || 0;
-    const filledSlots = (tournament.teams || []).filter(t => t.status === 'confirmed').length;
+    const filledSlots = parseInt(tournament.slots?.filled) || 0;
     const remainingSlots = totalSlots - filledSlots;
     const prizes = tournament.prizes || [];
     const totalPrize = prizes.reduce((sum, p) => sum + (parseInt(p.amount) || 0), 0);
-    const announcements = tournament.announcements || [];
     const isRegOpen = tournament.status === 'registration_open';
 
     return (
       <div>
-        {/* Announcement Banner */}
-        {announcements.length > 0 && (
-          <div className="announcement-banner">
-            <div className="announcement-scroll">
-              {[...announcements, ...announcements].map((a, i) => (
-                <span key={i} className="announcement-text">🔥 {a.text}</span>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Hero Section */}
         <section className="hero">
           <div className="hero-bg" />
@@ -304,4 +312,3 @@ export default function HomePage() {
     </div>
   );
 }
-

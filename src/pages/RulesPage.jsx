@@ -5,10 +5,32 @@ import { getTournamentBySlug } from '../services/dataService';
 export default function RulesPage() {
   const { slug } = useParams();
   const [tournament, setTournament] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setTournament(getTournamentBySlug(slug));
+    async function load() {
+      setLoading(true);
+      try {
+        const t = await getTournamentBySlug(slug);
+        setTournament(t);
+      } catch (err) {
+        console.error('Failed to load tournament:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
   }, [slug]);
+
+  if (loading) {
+    return (
+      <div className="page">
+        <div className="container text-center" style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <p style={{ color: 'var(--text-secondary)' }}>Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!tournament) {
     return <div className="page"><div className="container text-center"><h2>Tournament not found</h2></div></div>;

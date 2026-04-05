@@ -6,25 +6,54 @@ import { useToast } from '../../contexts/ToastContext';
 
 export default function AdminDashboard() {
   const [tournaments, setTournaments] = useState([]);
+  const [loading, setLoading] = useState(true);
   const toast = useToast();
 
-  useEffect(() => {
-    setTournaments(getAllTournaments());
-  }, []);
-
-  const handleDelete = (id, name) => {
-    if (confirm(`Delete "${name}"? This cannot be undone.`)) {
-      deleteTournament(id);
-      setTournaments(getAllTournaments());
-      toast.success('Tournament deleted');
+  const loadTournaments = async () => {
+    try {
+      const data = await getAllTournaments();
+      setTournaments(data);
+    } catch (err) {
+      console.error('Failed to load tournaments:', err);
+      toast.error('Failed to load tournaments');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleStatusChange = (id, status) => {
-    updateTournamentStatus(id, status);
-    setTournaments(getAllTournaments());
-    toast.success(`Status updated to ${STATUS_CONFIG[status]?.label}`);
+  useEffect(() => {
+    loadTournaments();
+  }, []);
+
+  const handleDelete = async (id, name) => {
+    if (confirm(`Delete "${name}"? This cannot be undone.`)) {
+      try {
+        await deleteTournament(id);
+        await loadTournaments();
+        toast.success('Tournament deleted');
+      } catch (err) {
+        toast.error(err.message || 'Failed to delete tournament');
+      }
+    }
   };
+
+  const handleStatusChange = async (id, status) => {
+    try {
+      await updateTournamentStatus(id, status);
+      await loadTournaments();
+      toast.success(`Status updated to ${STATUS_CONFIG[status]?.label}`);
+    } catch (err) {
+      toast.error(err.message || 'Failed to update status');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '50vh' }}>
+        <p style={{ color: 'var(--text-secondary)' }}>Loading tournaments...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="page">
@@ -54,7 +83,7 @@ export default function AdminDashboard() {
           <div className="flex flex-col gap-4">
             {tournaments.map(t => {
               const statusConf = STATUS_CONFIG[t.status] || STATUS_CONFIG.draft;
-              const confirmedTeams = (t.teams || []).filter(team => team.status === 'confirmed').length;
+              const filledSlots = parseInt(t.slots?.filled) || 0;
               const totalSlots = parseInt(t.slots?.total) || 0;
 
               return (
@@ -67,7 +96,7 @@ export default function AdminDashboard() {
                     <div className="flex gap-4 muted-text" style={{ fontSize: 'var(--text-sm)', flexWrap: 'wrap' }}>
                       <span>🏫 {t.basicInfo?.organizer || '—'}</span>
                       <span>📅 {formatDate(t.schedule?.date)}</span>
-                      <span>👥 {confirmedTeams}/{totalSlots} teams</span>
+                      <span>👥 {filledSlots}/{totalSlots} teams</span>
                       <span>🗺️ {t.schedule?.numMatches || 0} maps</span>
                     </div>
                   </div>
