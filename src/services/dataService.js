@@ -38,7 +38,8 @@ function dbToTournament(row) {
     },
     entry: {
       fee: row.entry_fee,
-      upiId: row.upi_id
+      upiId: row.upi_id,
+      qrCodeUrl: row.qr_code_url
     },
     prizes: row.prizes || [],
     qualifier: {
@@ -90,6 +91,7 @@ function tournamentToDb(tournament) {
     filled_slots: t.slots?.filled || 0,
     entry_fee: t.entry?.fee || 0,
     upi_id: t.entry?.upiId,
+    qr_code_url: t.entry?.qrCodeUrl || null,
     prizes: t.prizes || [],
     qualifier_enabled: t.qualifier?.enabled || false,
     qualifier_top_n: t.qualifier?.topN || 4,

@@ -287,6 +287,21 @@ export default function RegistrationPage() {
                 <div className="muted-text mt-2">
                   UPI: <span style={{ color: 'var(--accent-cyan)', fontWeight: 600 }}>{tournament.entry?.upiId}</span>
                 </div>
+                {tournament.entry?.qrCodeUrl && (
+                  <div style={{ marginTop: 'var(--space-4)' }}>
+                    <img src={tournament.entry.qrCodeUrl} alt="UPI QR Code"
+                      style={{
+                        maxWidth: 220,
+                        borderRadius: 'var(--radius-md)',
+                        border: '2px solid var(--accent-orange)',
+                        background: '#fff',
+                        padding: '8px'
+                      }} />
+                    <div className="muted-text" style={{ fontSize: 'var(--text-sm)', marginTop: 'var(--space-2)' }}>
+                      Scan QR code to pay
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="form-group">

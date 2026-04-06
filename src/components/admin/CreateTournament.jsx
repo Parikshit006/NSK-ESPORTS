@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createTournament } from '../../services/dataService';
+import { createTournament, uploadTournamentBanner } from '../../services/dataService';
+import { uploadToCloudinary } from '../../lib/cloudinary';
 import { DEFAULT_RULES } from '../../utils/helpers';
 import { SCORING_PRESETS } from '../../utils/scoring';
 import { useToast } from '../../contexts/ToastContext';
@@ -33,7 +34,7 @@ const INITIAL_FORM = {
     numMatches: 3,
   },
   slots: { total: 12, filled: 0 },
-  entry: { fee: 0, upiId: '' },
+  entry: { fee: 0, upiId: '', qrCodeUrl: '' },
   prizes: [
     { position: 1, label: '1st Place', amount: '' },
   ],
@@ -253,13 +254,36 @@ export default function CreateTournament() {
       </div>
 
       {parseInt(form.entry.fee) > 0 && (
-        <div className="form-group animate-fadeIn">
-          <label className="form-label">UPI ID for Payment <span className="required">*</span></label>
-          <input className="form-input" placeholder="yourname@upi"
-            value={form.entry.upiId} onChange={e => updateField('entry', 'upiId', e.target.value)} />
-          {renderError('entry.upiId')}
-          <div className="form-hint">This will be shown to teams during registration</div>
-        </div>
+        <>
+          <div className="form-group animate-fadeIn">
+            <label className="form-label">UPI ID for Payment <span className="required">*</span></label>
+            <input className="form-input" placeholder="yourname@upi"
+              value={form.entry.upiId} onChange={e => updateField('entry', 'upiId', e.target.value)} />
+            {renderError('entry.upiId')}
+            <div className="form-hint">This will be shown to teams during registration</div>
+          </div>
+          <div className="form-group animate-fadeIn">
+            <label className="form-label">UPI QR Code Image</label>
+            <input type="file" accept="image/*" className="form-input"
+              style={{ padding: 'var(--space-2)' }}
+              onChange={async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                try {
+                  const url = await uploadToCloudinary(file, 'nsk-qr-codes');
+                  setForm(prev => ({ ...prev, entry: { ...prev.entry, qrCodeUrl: url } }));
+                  toast.success('QR code uploaded!');
+                } catch (err) {
+                  toast.error('QR upload failed: ' + err.message);
+                }
+              }} />
+            <div className="form-hint">Upload your UPI QR code so players can scan and pay</div>
+            {form.entry.qrCodeUrl && (
+              <img src={form.entry.qrCodeUrl} alt="QR Code"
+                style={{ maxWidth: 180, borderRadius: 'var(--radius-md)', marginTop: 'var(--space-2)', border: '1px solid var(--border-default)' }} />
+            )}
+          </div>
+        </>
       )}
     </div>
   );
