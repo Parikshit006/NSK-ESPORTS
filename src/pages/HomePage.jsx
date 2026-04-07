@@ -192,7 +192,7 @@ export default function HomePage() {
                   </span>
                 </div>
                 <div className="slot-bar">
-                  <div className="slot-bar-fill" style={{ width: `${(filledSlots / totalSlots) * 100}%` }} />
+                  <div className="slot-bar-fill" style={{ width: `${totalSlots > 0 ? (filledSlots / totalSlots) * 100 : 0}%` }} />
                 </div>
                 <div className="slot-icons mt-4">
                   {Array.from({ length: totalSlots }, (_, i) => (
@@ -239,22 +239,22 @@ export default function HomePage() {
               </div>
               <div className="flex gap-4 justify-center" style={{ flexWrap: 'wrap' }}>
                 {tournament.contact.whatsapp && (
-                  <a href={`https://wa.me/${tournament.contact.whatsapp}`} target="_blank" rel="noopener" className="btn btn-success">
+                  <a href={`https://wa.me/${tournament.contact.whatsapp}`} target="_blank" rel="noopener noreferrer" className="btn btn-success">
                     📱 WhatsApp
                   </a>
                 )}
                 {tournament.contact.whatsappGroup && (
-                  <a href={tournament.contact.whatsappGroup} target="_blank" rel="noopener" className="btn btn-success">
+                  <a href={tournament.contact.whatsappGroup} target="_blank" rel="noopener noreferrer" className="btn btn-success">
                     👥 Join Group
                   </a>
                 )}
                 {tournament.contact.discord && (
-                  <a href={tournament.contact.discord} target="_blank" rel="noopener" className="btn btn-secondary">
+                  <a href={tournament.contact.discord} target="_blank" rel="noopener noreferrer" className="btn btn-secondary">
                     🎮 Discord
                   </a>
                 )}
                 {tournament.contact.instagram && (
-                  <a href={tournament.contact.instagram} target="_blank" rel="noopener" className="btn btn-ghost">
+                  <a href={tournament.contact.instagram} target="_blank" rel="noopener noreferrer" className="btn btn-ghost">
                     📸 Instagram
                   </a>
                 )}
