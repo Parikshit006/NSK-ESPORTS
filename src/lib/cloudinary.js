@@ -4,7 +4,7 @@ const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
 /**
  * Upload a file to Cloudinary using unsigned upload preset.
  * Used for tournament banner images only.
- * Payment screenshots go to Supabase Storage (private).
+ * Payment screenshots go to secure backend storage (private).
  *
  * @param {File} file - Image file to upload
  * @param {string} folder - Cloudinary folder name e.g. "nsk-banners"
