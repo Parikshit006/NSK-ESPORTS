@@ -14,6 +14,7 @@ import {
 } from '../../utils/helpers';
 import { useToast } from '../../contexts/ToastContext';
 import ResultsTemplate from '../leaderboard/ResultsTemplate';
+import OcrUploadModal from './ocr/OcrUploadModal.jsx';
 
 const TABS = [
   { key: 'overview', label: '📊 Overview', icon: '📊' },
@@ -423,6 +424,7 @@ function ResultsTab({ tournament, reload, toast }) {
   const [selectedMatch, setSelectedMatch] = useState(1);
   const [results, setResults] = useState({});
   const [publishing, setPublishing] = useState(false);
+  const [showOcrModal, setShowOcrModal] = useState(false);
 
   const scoring = getScoringConfig(tournament);
   const confirmedTeams = (tournament.teams || []).filter(t => t.status === 'confirmed' || t.status === 'disqualified');
@@ -458,6 +460,31 @@ function ResultsTab({ tournament, reload, toast }) {
         [teamId]: { ...current, playerKills: newPlayerKills, kills: totalKills }
       };
     });
+  };
+
+  const handleApplyOcrResults = (squads) => {
+    setResults(prev => {
+      const updated = { ...prev };
+      squads.forEach(sq => {
+        if (sq.teamId) {
+          const playerKills = {};
+          if (sq.players && sq.players.length > 0) {
+            sq.players.forEach(p => {
+              const key = p.matchedIGN || p.rawIGN;
+              if (key) playerKills[key] = p.kills || 0;
+            });
+          }
+          updated[sq.teamId] = {
+            placement: sq.placement,
+            kills: sq.totalKills,
+            playerKills: Object.keys(playerKills).length > 0 ? playerKills : (prev[sq.teamId]?.playerKills || {}),
+            ocrImported: true
+          };
+        }
+      });
+      return updated;
+    });
+    toast.success(`Imported results for ${squads.filter(s => s.teamId).length} teams from OCR! Please review before publishing.`);
   };
 
   const getPreview = (teamId) => {
@@ -521,7 +548,17 @@ function ResultsTab({ tournament, reload, toast }) {
 
       {/* Team-wise Entry */}
       <div className="card">
-        <h4 style={{ marginBottom: 'var(--space-4)' }}>🎯 Match {selectedMatch} — Enter Results</h4>
+        <div className="flex justify-between items-center mb-4" style={{ flexWrap: 'wrap', gap: 'var(--space-3)' }}>
+          <h4 style={{ margin: 0 }}>🎯 Match {selectedMatch} — Enter Results</h4>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setShowOcrModal(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <span>⚡</span> Scan Scoreboard (OCR)
+          </button>
+        </div>
 
         {confirmedTeams.length === 0 ? (
           <p className="muted-text">No confirmed teams. Approve teams first.</p>
@@ -543,17 +580,26 @@ function ResultsTab({ tournament, reload, toast }) {
                     .sort((a, b) => (a.slotNumber || 99) - (b.slotNumber || 99))
                     .map(team => {
                       const preview = getPreview(team.id);
+                      const isOcrImported = results[team.id]?.ocrImported;
                       return (
-                        <tr key={team.id} className={team.status === 'disqualified' ? 'dq' : ''}>
+                        <tr key={team.id} className={team.status === 'disqualified' ? 'dq' : ''}
+                          style={isOcrImported ? { background: 'rgba(0, 207, 255, 0.04)' } : undefined}>
                           <td className="rank-cell">#{team.slotNumber}</td>
                           <td className="team-cell">
-                            <div style={{ fontWeight: 600, marginBottom: '6px' }}>{team.teamName}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                              <span style={{ fontWeight: 600 }}>{team.teamName}</span>
+                              {isOcrImported && (
+                                <span className="badge badge-info" style={{ fontSize: '9px', padding: '1px 5px' }}>
+                                  OCR Draft
+                                </span>
+                              )}
+                            </div>
                             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '6px' }}>
                               {(team.players || []).map((p, i) => (
                                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
                                   <input type="number" min={0}
                                     style={{ width: '36px', height: '24px', padding: '0 4px', background: 'var(--bg-dark)', border: '1px solid var(--border-default)', borderRadius: '4px', textAlign: 'center', color: 'var(--text-primary)' }}
-                                    value={results[team.id]?.playerKills?.[p.ign] || ''}
+                                    value={results[team.id]?.playerKills?.[p.ign] ?? ''}
                                     onChange={e => updatePlayerKill(team.id, p.ign, e.target.value)}
                                     disabled={team.status === 'disqualified'} />
                                   <span className="muted-text" title={p.ign} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.ign}</span>
@@ -571,11 +617,11 @@ function ResultsTab({ tournament, reload, toast }) {
                           </td>
                           <td>
                             <input type="number" className="form-input" min={0}
-                              style={{ padding: 'var(--space-2)', background: 'var(--bg-lighter)' }}
+                              style={{ padding: 'var(--space-2)' }}
                               placeholder="Total"
-                              title="Calculated from individual players"
-                              value={results[team.id]?.kills || ''}
-                              readOnly
+                              title="Total kills (editable directly or via players)"
+                              value={results[team.id]?.kills ?? ''}
+                              onChange={e => updateResult(team.id, 'kills', e.target.value)}
                               disabled={team.status === 'disqualified'} />
                           </td>
                           <td>
@@ -609,6 +655,16 @@ function ResultsTab({ tournament, reload, toast }) {
           </>
         )}
       </div>
+
+      {/* OCR Upload & Verification Modal */}
+      <OcrUploadModal
+        isOpen={showOcrModal}
+        onClose={() => setShowOcrModal(false)}
+        tournament={tournament}
+        selectedMatch={selectedMatch}
+        scoring={scoring}
+        onApplyResults={handleApplyOcrResults}
+      />
     </div>
   );
 }
