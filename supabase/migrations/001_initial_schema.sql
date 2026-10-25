@@ -41,6 +41,7 @@ CREATE TABLE tournaments (
   -- Entry
   entry_fee     INTEGER NOT NULL DEFAULT 0 CHECK (entry_fee >= 0),
   upi_id        TEXT,
+  qr_code_url   TEXT,
 
   -- Prizes: stored as JSON array
   prizes        JSONB NOT NULL DEFAULT '[]'::jsonb,
